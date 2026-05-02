@@ -7,35 +7,23 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <net/if.h>
-#include <netdb.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/select.h>
 #include <pthread.h>
+
+#include "../sender/demo_ui.h"
 
 #define MC_PORT 5433
 #define BUF_SIZE 64000
 
-//structure of song info
-struct song_info
-{
-	  char song_name[ 50 ];
-	  uint16_t remaining_time_in_sec;
-	  char next_song_name[ 50 ];
-};
-
-pthread_cond_t cond1 = PTHREAD_COND_INITIALIZER; 
- 
-// declaring mutex 
-//pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; 
-  
 int done = 0; 
 int r=1;
 
 /* Function for Pause */
 int func1(GtkWidget *widget,gpointer   data)
 {
+   (void)widget;
+   (void)data;
    g_print ("video is pause...\n");
    done=1;
    return 0;
@@ -44,7 +32,9 @@ int func1(GtkWidget *widget,gpointer   data)
 /* Function for Resume */
 int func2(GtkWidget *widget,gpointer   data)
 {
-   g_print ("video resumed...\n");
+   (void)widget;
+   (void)data;
+   g_print ("Resumed\n");
   
    done=0;
 	r=0;
@@ -55,7 +45,9 @@ int func2(GtkWidget *widget,gpointer   data)
 /* Function for Change Station */
 void func3(GtkWidget *widget,gpointer   data)
 {
-   g_print ("Request to change the station\n");
+   (void)widget;
+   (void)data;
+   g_print ("Changing station\n");
    system("pkill ffplay");
    remove("live_data.mp4");
    exit(0);
@@ -64,7 +56,9 @@ void func3(GtkWidget *widget,gpointer   data)
 /* Function for Terminate */
 int func4(GtkWidget *widget,gpointer   data)
 {
-  g_print ("Terminated from current station...\nBYE BYE...\n");
+  (void)widget;
+  (void)data;
+  g_print ("Goodbye\n");
   system("pkill ffplay");
   remove("live_data.mp4");
   exit(0);
@@ -73,44 +67,32 @@ int func4(GtkWidget *widget,gpointer   data)
 
 void* threadFunction(void* args)
 {
-     	
-  printf("in thread\n");	 
-  
-  int s,s_tcp; /* socket descriptor */
-  struct hostent *hp;
-  struct sockaddr_in sin,cliaddr; /* socket struct */
-  char *if_name; /* name of interface */
-  struct ifreq ifr; /* interface struct */
- 
-               
-  char buf[BUF_SIZE],buf1[BUF_SIZE];
-  int len;
-  char str[500];
-  /* Multicast specific */
-  char *mcast_addr; /* multicast address */
-  struct ip_mreq mcast_req;  /* multicast join struct */
-  struct sockaddr_in mcast_saddr; /* multicast sender*/
+  int s;
+  struct sockaddr_in sin;
+#if defined(__linux__) && defined(SO_BINDTODEVICE)
+  const char *if_name = "wlan0";
+  struct ifreq ifr;
+#endif
+
+  char buf[BUF_SIZE];
+  ssize_t len;
+  char *mcast_addr;
+  struct ip_mreq mcast_req;
+  struct sockaddr_in mcast_saddr;
   socklen_t mcast_saddr_len;
-  char add[32];
  
   mcast_addr = args;
-#if defined(__APPLE__)
-  if_name = "en0";
-#else
-  if_name = "wlan0";
-#endif
+
+  demo_receiver_in_thread();
 
   /* create socket */
   if ((s = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
   {
-		perror("receiver: socket");
+		demo_not_ready();
 		exit(1);
   }
-  else
-  printf("udp Socket created\n");
- 
-  int x=sizeof(sin);
- 
+  demo_udp_socket_created();
+
   /* build address data structure */
   memset((char *)&sin, 0, sizeof(sin));
   sin.sin_family = AF_INET;
@@ -123,27 +105,23 @@ void* threadFunction(void* args)
   strncpy(ifr.ifr_name, if_name, IFNAMSIZ - 1);
   if ((setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr))) < 0)
   {
-      perror("receiver: setsockopt() error");
       close(s);
+      demo_not_ready();
       exit(1);
   }
-  else
-  		printf("setsockopt SO_BINDTODEVICE ok\n");
 #else
-  (void)if_name;
-  printf("SO_BINDTODEVICE not used on this platform\n");
+  demo_bindtodevice_not_used();
 #endif
 
   /* bind the socket */
   
   if ((bind(s, (struct sockaddr *) &sin, sizeof(sin))) < 0)
   {
-    perror("receiver: bind()");
     close(s);
+    demo_not_ready();
     exit(1);
   }
-  else
-  printf("udp binded\n");
+  demo_udp_binded();
   /* Multicast specific code follows */
  
   /* build IGMP join message structure */
@@ -153,16 +131,22 @@ void* threadFunction(void* args)
   /* send multicast join message */
   if ((setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, (void*) &mcast_req, sizeof(mcast_req))) < 0)
   {
-    perror("mcast join receive: setsockopt()");
+    close(s);
+    demo_not_ready();
     exit(1);
   }
 
-  /* receive multicast messages */  
-  printf("\nReady to listen!\n\n");
+  demo_ready_to_listen();
+
   int i=0;
   FILE *fp;
   fp=fopen("live_data.mp4","wb");
-  
+  if (fp == NULL) {
+    close(s);
+    demo_not_ready();
+    exit(1);
+  }
+
   /* reset sender struct */
   memset(&mcast_saddr, 0, sizeof(mcast_saddr));
   mcast_saddr_len = sizeof(mcast_saddr);
@@ -171,19 +155,18 @@ void* threadFunction(void* args)
   {   
     	if(done==0)
       {
-             memset(&buf, 0, sizeof(buf));
-             int err,l;
-             
+             memset(buf, 0, sizeof(buf));
+
              len = recvfrom(s, buf, sizeof(buf), 0,(struct sockaddr*)&mcast_saddr, &mcast_saddr_len);
             
-             if(len<0)
+             if (len < 0)
              {
-                 printf("Error in receiving\n");
+                 /* silent */
              }
              else
              {
-                 printf("%d Receiving  %d\n",i,len);
-                 fwrite(buf,1,len,fp);
+                 fwrite(buf,1,(size_t)len,fp);
+                 demo_line_receiving(i, (size_t)len);
                  if(i==8)
             	  {
 #if defined(__APPLE__)
@@ -205,31 +188,47 @@ void* threadFunction(void* args)
 int main(int argc, char *argv[])
 {
     char *mcast_addr;
-    
-    if(argc==2)
-		mcast_addr= argv[1];    
-	 else
-	 	printf("\nInvalid arguments");
-	 		
-    pthread_t id; 
-    pthread_create(&id,NULL,&threadFunction,mcast_addr);
+
+    if (argc != 2)
+    {
+	    printf("receiver <multicast_address>\n");
+	    return 1;
+    }
+    mcast_addr = argv[1];
+
+    pthread_t id;
+    if (pthread_create(&id, NULL, &threadFunction, mcast_addr) != 0)
+    {
+	    demo_not_ready();
+	    return 1;
+    }
 
     gtk_init (&argc, &argv);
     GtkWidget *window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
     GtkWidget *grid;
     GtkWidget *button;
-    GtkWidget *label;
-    GdkColor color;
+    GtkCssProvider *css;
 
     gtk_window_set_title (GTK_WINDOW (window), "Control!");
     gtk_window_set_default_size (GTK_WINDOW (window), 200, 200);		//Set window size
-    gdk_color_parse ("light yellow", &color);		//Set color of GUI window
+    gtk_widget_set_name (window, "receiver_root");
+    css = gtk_css_provider_new ();
+    gtk_css_provider_load_from_data (
+        css,
+        "#receiver_root { background-color: lightyellow; }\n",
+        -1,
+        NULL);
+    gtk_style_context_add_provider (
+        gtk_widget_get_style_context (window),
+        GTK_STYLE_PROVIDER (css),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref (css);
+
     g_signal_connect (window, "destroy", G_CALLBACK (gtk_main_quit), NULL);
       
     grid = gtk_grid_new ();
       
     gtk_container_add (GTK_CONTAINER (window), grid);
-    gtk_widget_modify_bg ( GTK_WIDGET(window), GTK_STATE_NORMAL, &color);
   
   
     button = gtk_button_new_with_label ("Pause");
@@ -256,7 +255,7 @@ int main(int argc, char *argv[])
      
     gtk_widget_show_all (window);
     gtk_main ();
-       
-            
+
+    return 0;
 }
 

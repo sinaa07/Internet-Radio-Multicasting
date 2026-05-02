@@ -7,15 +7,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <net/if.h>
 #include <netdb.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 #include <arpa/inet.h>
  
 /* Match sender/server.c SERVER_PORT (avoid PostgreSQL default 5432). */
 #define MC_PORT 15432
-#define BUF_SIZE 64000
 
 struct site_info
 {
@@ -46,6 +43,7 @@ int updateLabel(GtkLabel *lab, const gchar *display)
 /* function for button 1 "station 1" */
 int func1(GtkWidget *widget,gpointer data)
 {
+	(void)widget;
 	GtkLabel *lab = GTK_LABEL(data);
 	const gchar *display;
 	display="Connected to Station 1!";
@@ -66,6 +64,7 @@ int func1(GtkWidget *widget,gpointer data)
 /* function for button 2 "station 2" */
 int func2(GtkWidget *widget,gpointer data)
 {
+	(void)widget;
 	GtkLabel *lab = GTK_LABEL(data);
 	const gchar *display;
 	display="Connected to Station 2!";
@@ -85,6 +84,8 @@ int func2(GtkWidget *widget,gpointer data)
 
 int func3(GtkWidget *widget,gpointer data)
 {
+	(void)widget;
+	(void)data;
 	exit(0);
 	return 0;
 }
@@ -93,31 +94,13 @@ int func3(GtkWidget *widget,gpointer data)
 /* function for button 3*/
 int main(int argc, char * argv[])
 {
-  char string[200]="./receiver ";
-  char string1[200]="./temp ";
-  FILE *fp;
-  int s,s_tcp; 									/* socket descriptor */
+  char *host;
+  struct station_info stat1, stat2;
+  struct site_info site1, site2;
+  int s_tcp;
   struct hostent *hp;
-  struct sockaddr_in sin,sin_t,cliaddr;   /* socket struct */
-  char *if_name; 									/* name of interface */
-  struct ifreq ifr; 								/* interface struct */
-    char *host;
-  struct station_info stat1,stat2,stat3;
-  struct site_info site1,site2,site3;
-  //struct site_info site;
- 
+  struct sockaddr_in sin_t;
 
- 
-  char buf[BUF_SIZE],buf1[BUF_SIZE];
-  int len;
-  char str[200];
-  /* Multicast specific */
-  char *mcast_addr; 					 /* multicast address */
-  struct ip_mreq mcast_req;  		 /* multicast join struct */
-  struct sockaddr_in mcast_saddr; /* multicast sender*/
-  socklen_t mcast_saddr_len;
- 
- 
   if (argc==2) {
     host = argv[1];
   }
@@ -161,9 +144,6 @@ int main(int argc, char * argv[])
     }
   else
     printf("Client connected in tcp.\n");
-   
-
-  int num;
 
  if((send(s_tcp, "Start\n", strlen("Start\n")+1, 0)) <0)
   printf("\nclient not ready to receive\n");
@@ -224,13 +204,24 @@ int main(int argc, char * argv[])
   GtkWidget *window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
   GtkWidget *grid;
   GtkWidget *button;
-  GtkWidget *label;
   GtkWidget *lab;
-  GdkColor color;
+  GtkCssProvider *css;
 
   gtk_window_set_title (GTK_WINDOW (window), "Welcome to Television!");
   gtk_window_set_default_size (GTK_WINDOW (window), 200, 200);
-  gdk_color_parse ("light yellow", &color);		//Set color of GUI window
+  gtk_widget_set_name (window, "client_root");
+  css = gtk_css_provider_new ();
+  gtk_css_provider_load_from_data (
+      css,
+      "#client_root { background-color: lightyellow; }\n",
+      -1,
+      NULL);
+  gtk_style_context_add_provider (
+      gtk_widget_get_style_context (window),
+      GTK_STYLE_PROVIDER (css),
+      GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref (css);
+
   g_signal_connect (window, "destroy", G_CALLBACK (gtk_main_quit), NULL);
   
   
