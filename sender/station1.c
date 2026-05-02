@@ -6,13 +6,23 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h>
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <errno.h>
+
+#include "multicast_tx.h"
+#include "demo_ui.h"
 
 #define MC_PORT 5433
 #define BUF_SIZE 1200
+
+static void
+quiet_socket_setup(int s)
+{
+	unsigned char loop = 1;
+
+	(void)setsockopt(s, IPPROTO_IP, IP_MULTICAST_LOOP,
+	    &loop, sizeof(loop));
+}
 
 //structure of song info
 struct song_info
@@ -24,130 +34,161 @@ struct song_info
 
 int main(int argc, char * argv[])
 {
-	  int s; // socket descriptor 
-	  struct sockaddr_in sin; // socket struct 
-	  char buf[BUF_SIZE];
+	  int s;
+	  struct sockaddr_in sin;
 	  int len;
 	  socklen_t sin_len;
 	  sin_len = sizeof(sin);
-	  
-	  // Multicast specific 
-	  char *mcast_addr; // multicast address 
-	  char * video[5]; 
-	  
-	  //Array of video names
+
+	  char *mcast_addr;
+	  char *iface_ip_opt = NULL;
+	  char * video[5];
+
 	  video[0] = "vid7.mp4";
 	  video[1] = "vid4.mp4";
 	  video[2] = "vid1.mp4";
 	  video[3] = "vid3.mp4";
-	  
-	  
-	  // Add code to take port number from user 
-	  if (argc==2) 
-	  {
-		 	mcast_addr = argv[1];
-	  }
-	  else 
-	  {
-			 fprintf(stderr, "usage: sender multicast_address\n");
-			 exit(1);
-	  }
-	  
-	  if ((s = socket(PF_INET, SOCK_DGRAM, 0)) < 0) 	//Create socket
-	  {
-			 perror("server UDP: socket");
-			 exit(1);
-  	  }
 
-	  /* Keep multicast traffic on local host/network for lab testing. */
-	  unsigned char loop = 1;
-	  if (setsockopt(s, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)) < 0)
-	  {
-		  perror("station1: setsockopt(IP_MULTICAST_LOOP)");
+	  if (argc == 2 || argc == 3) {
+		 	mcast_addr = argv[1];
+		 	if (argc == 3)
+		 		iface_ip_opt = argv[2];
 	  }
-  
-	  // build address data structure 
+	  else {
+		  printf("%s <multicast_address> [optional_local_ip]\n", argv[0]);
+		  return 1;
+	  }
+
+	  multicast_tx_set_demo_quiet(1);
+
+	  if ((s = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
+		  demo_not_ready();
+		  return 1;
+	  }
+
+	  if (multicast_tx_configure_ipv4(s, iface_ip_opt, mcast_addr,
+		  MC_PORT) < 0) {
+		  demo_not_ready();
+		  close(s);
+		  return 1;
+	  }
+
+	  quiet_socket_setup(s);
+
 	  memset((char *)&sin, 0, sizeof(sin));
 	  sin.sin_family = AF_INET;
 	  sin.sin_addr.s_addr = inet_addr(mcast_addr);
 	  sin.sin_port = htons(MC_PORT);
 
-	  printf("Connected in first station\n\n ");
-	  memset(buf, 0, sizeof(buf));
-	  
-	  FILE *fp=NULL;	
-	  int i;
-	  while(1)
+	  demo_station1_connected();
+
+	  FILE *fp = NULL;
+	  int vid;
+
+	  while (1)
 	  {
-		  for(i=0; i<4; i++)		//Sending videos one by one
+		  unsigned long lap_sent = 0;
+		  unsigned fr;
+
+		  for (vid = 0; vid < 4; vid++)
 		  {
-		  	
-		     	fp=fopen(video[i],"rb");
-		   	      
-			  	if(fp==NULL)	   //Check if file exist
-			  	{
-				    printf("\nFile not found\n");
-			  	}
-			  	else
-			  	{
-					int tot_frame,i;
-					fseek(fp, 0, SEEK_END);
-					long fsize = ftell(fp);		//Calculate file size
-					long p=(fsize % BUF_SIZE);
-					if ((fsize % BUF_SIZE) != 0)
-					{
-						tot_frame = (fsize / BUF_SIZE) + 1;
-					}		
-					else
-						tot_frame = (fsize / BUF_SIZE);
-					
-					printf("last packets are :%ld\n\n", p); 
-					printf("Total number of packets are :%d\n\n", tot_frame);
-								 
-					fseek(fp, 0, SEEK_SET);
-							 
-					if(tot_frame==0 || tot_frame==1)
-					{
-							char *string = malloc(fsize + 1);
-							size_t bytes_read = fread(string,1,fsize,fp);		     //Read data into string        
-							fseek(fp, 0, SEEK_SET);
-							int x=sendto(s,string,bytes_read,0,(struct sockaddr*)&sin, sin_len); //Sending data to the receiver
-							if (x < 0)
-							{
-								perror("station1: sendto(single frame)");
-							}
-							else
-							{
-								printf("sent %d bytes\n",x);
-							}
-							free(string);
-					}
-					else
-					{ 
-							
-							for(i=1;i<=tot_frame;i++)
-							{
-							     char *string = malloc(BUF_SIZE);
-							     len=fread(string,1,BUF_SIZE,fp);	           
-							     fseek(fp, 0, SEEK_CUR);
-							     int x=sendto(s,string,len,0,(struct sockaddr*)&sin,sin_len); //Sending data frame by frame
-							     if (x < 0)
-							     {
-							     	perror("station1: sendto(frame)");
-							     	free(string);
-							     	break;
-							     }
-							     printf("sent frame %d (%d bytes)\n",i, x);
-							     free(string);
-						     	  //usleep(854400);
-						     	  usleep(400000);
-							}
-							
-					}
-					fclose(fp); //close file pointer
-				}
+		  	fp = fopen(video[vid], "rb");
+
+		  	if (fp == NULL)
+		  	{
+		  		demo_line_track_skipped();
+		  	}
+		  	else
+		  	{
+				  int tot_frame;
+				  long fsize;
+				  long p;
+
+				  fseek(fp, 0, SEEK_END);
+				  fsize = ftell(fp);
+				  p = (fsize % BUF_SIZE);
+				  if ((fsize % BUF_SIZE) != 0)
+					  tot_frame = (int)((fsize / BUF_SIZE) + 1);
+				  else
+					  tot_frame = (int)(fsize / BUF_SIZE);
+
+				  (void)p;
+
+				  fseek(fp, 0, SEEK_SET);
+
+				  if (tot_frame == 0) {
+					  fclose(fp);
+					  continue;
+				  }
+
+				  if (tot_frame == 1)
+				  {
+					  char *payload =
+					      malloc((size_t)fsize + 1u);
+					  size_t bytes_read;
+					  long last_sz;
+
+					  if (payload == NULL) {
+						  fclose(fp);
+						  continue;
+					  }
+					  last_sz = fsize;
+					  demo_file_preamble(last_sz,
+					      tot_frame);
+					  (void)fseek(fp, 0, SEEK_SET);
+					  bytes_read = fread(payload, 1,
+					      (size_t)fsize, fp);
+					  if (sendto(s, payload,
+					      bytes_read, 0,
+					      (struct sockaddr *)&sin,
+					      sin_len) < 0)
+						  demo_line_packet_skipped();
+					  else {
+						  lap_sent++;
+						  demo_line_sent(1,
+						      (int)bytes_read);
+					  }
+					  free(payload);
+				  }
+				  else
+				  {
+					  long last_sz;
+
+					  last_sz = (fsize % BUF_SIZE) != 0 ?
+					      (fsize % BUF_SIZE) : BUF_SIZE;
+					  demo_file_preamble(last_sz,
+					      tot_frame);
+					  for (fr = 1; fr <= (unsigned)
+					      tot_frame; fr++)
+					  {
+						  char *chunk = malloc(BUF_SIZE);
+
+						  if (chunk == NULL)
+							  break;
+						  len =
+						      (int)fread(chunk, 1,
+						      BUF_SIZE, fp);
+						  (void)fseek(fp, 0,
+						      SEEK_CUR);
+						  if (sendto(s, chunk,
+							      len, 0,
+							      (struct sockaddr
+							      *)&sin,
+							      sin_len) < 0) {
+							  demo_line_packet_skipped();
+							  free(chunk);
+							  break;
+						  }
+						  lap_sent++;
+						  demo_line_sent(fr, len);
+						  free(chunk);
+						  usleep(400000);
+					  }
+				  }
+				  fclose(fp);
+		  	}
 		  }
+		  (void)lap_sent;
 	  }
 	  return 0;
 }
-

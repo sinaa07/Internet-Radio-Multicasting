@@ -39,15 +39,15 @@ struct station_info
 
 int main()
 {
-  struct station_info stat1,stat2,stat3;
-  struct site_info site1,site2,site3;  
+  struct station_info stat1, stat2;
+  struct site_info site1, site2;
   struct sockaddr_in sin;
-  
+  struct sockaddr_in peer;
+  socklen_t peer_len;
+
   char buf[MAX_LINE];
-  int len;
   int s, new_s;
   char str[INET_ADDRSTRLEN];
-  int num;
   
   /* build address data structure */
   bzero((char *)&sin, sizeof(sin));
@@ -75,7 +75,8 @@ int main()
   
   while(1)
   {
-		if((new_s = accept(s, (struct sockaddr*)&sin, &len))<0)	 //Accept
+		peer_len = sizeof(peer);
+		if ((new_s = accept(s, (struct sockaddr*)&peer, &peer_len)) < 0)
 		{	
 	  		 printf("Error in accepting\n");
 		}    

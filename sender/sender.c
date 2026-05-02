@@ -12,7 +12,10 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <arpa/inet.h>
- 
+#include <errno.h>
+
+#include "multicast_tx.h"
+
 #define MC_PORT 15432
 #define BUF_SIZE 64000
 
@@ -27,14 +30,18 @@ int main(int argc, char * argv[]){
   sin_len = sizeof(sin);
   /* Multicast specific */
   char *mcast_addr; /* multicast address */
+  char *iface_ip_opt = NULL;
   int tcp_ac;
   
   /* Add code to take port number from user */
-  if (argc==2) {
+  if (argc >= 2 && argc <= 3) {
     mcast_addr = argv[1];
+    if (argc == 3)
+      iface_ip_opt = argv[2];
   }
   else {
-    fprintf(stderr, "usage: sender multicast_address\n");
+    fprintf(stderr,
+        "usage: sender multicast_address [local_iface_ipv4]\n");
     exit(1);
   }
   
@@ -89,7 +96,7 @@ int main(int argc, char * argv[]){
 
 	//usleep(5000000);
 	//while(num==0){
-    	int n = recv(tcp_ac, &num, sizeof(num)+1, 0);
+    	(void)recv(tcp_ac, &num, sizeof(num)+1, 0);
 //}	
     //read(s_tcp, &num, sizeof(num));
     printf("Station number is: %d\n\n",num);
@@ -100,16 +107,19 @@ int main(int argc, char * argv[]){
     perror("server UDP: socket");
     exit(1);
   }
-  
+
+  if (multicast_tx_configure_ipv4(s, iface_ip_opt, mcast_addr, MC_PORT) < 0) {
+    close(s);
+    close(s_tcp);
+    close(tcp_ac);
+    exit(1);
+  }
+
   // build address data structure 
   memset((char *)&sin, 0, sizeof(sin));
   sin.sin_family = AF_INET;
   sin.sin_addr.s_addr = inet_addr(mcast_addr);
   sin.sin_port = htons(MC_PORT);
-
-	int length = sizeof(mcast_addr);
-  //printf("\nWrite messages below to multicast!\n\n");
-
 
   memset(buf, 0, sizeof(buf));
   
@@ -117,7 +127,7 @@ int main(int argc, char * argv[]){
     if ((len = sendto(s, buf, sizeof(buf), 0,
 		      (struct sockaddr *)&sin, 
 		      sizeof(sin))) == -1) {
-      perror("sender: sendto");
+      multicast_tx_warn_sendto("sender: sendto");
       exit(1);
     }
     
@@ -162,8 +172,8 @@ int main(int argc, char * argv[]){
 		      char *string = malloc(fsize + 1);
 			      fread(string,1,fsize+1,fp);		          
 			      fseek(fp, 0, SEEK_SET);
-			      int x=sendto(s,string,fsize+1,0,(struct sockaddr*)&sin, sin_len); 
-		      printf("%d\n",x);
+		      printf("%d\n", (int)sendto(s, string, fsize + 1, 0,
+		                               (struct sockaddr *)&sin, sin_len));
 		}
 		else
 		{ 
@@ -172,8 +182,12 @@ int main(int argc, char * argv[]){
 			              char *string = malloc(BUF_SIZE);
 			              len=fread(string,1,BUF_SIZE,fp);	           
 			              fseek(fp, 0, SEEK_CUR);
-			              int x=sendto(s,string,len,0,(struct sockaddr*)&sin,sin_len); 
-			              printf("sent frame %d\n",i);
+			              if (sendto(s, string, len, 0,
+			                         (struct sockaddr *)&sin,
+			                         sin_len) < 0)
+				              multicast_tx_warn_sendto("sender: sendto");
+			              else
+				              printf("sent frame %d\n", i);
 			                    //usleep(2*100000);
 		              	  usleep(2*100000);
 		      }
@@ -222,8 +236,9 @@ int main(int argc, char * argv[]){
 			      char *string = malloc(fsize + 1);
 				      fread(string,1,fsize+1,fp);		          
 				      fseek(fp, 0, SEEK_SET);
-				      int x=sendto(s,string,fsize+1,0,(struct sockaddr*)&sin, sin_len); 
-			      printf("%d\n",x);
+			      printf("%d\n", (int)sendto(s, string, fsize + 1, 0,
+			                                 (struct sockaddr *)&sin,
+			                                 sin_len));
 			}
 			else
 			{ 
@@ -232,8 +247,12 @@ int main(int argc, char * argv[]){
 					      char *string = malloc(BUF_SIZE);
 					      len=fread(string,1,BUF_SIZE,fp);	           
 					      fseek(fp, 0, SEEK_CUR);
-					      int x=sendto(s,string,len,0,(struct sockaddr*)&sin,sin_len); 
-					      printf("sent frame %d\n",i);
+					      if (sendto(s, string, len, 0,
+					                 (struct sockaddr *)&sin,
+					                 sin_len) < 0)
+						      multicast_tx_warn_sendto("sender: sendto");
+					      else
+						      printf("sent frame %d\n", i);
 				      	usleep(2*100000);
 			      }
 			      
@@ -276,8 +295,9 @@ int main(int argc, char * argv[]){
 			      char *string = malloc(fsize + 1);
 				      fread(string,1,fsize+1,fp);		          
 				      fseek(fp, 0, SEEK_SET);
-				      int x=sendto(s,string,fsize+1,0,(struct sockaddr*)&sin, sin_len); 
-			      printf("%d\n",x);
+			      printf("%d\n", (int)sendto(s, string, fsize + 1, 0,
+			                                 (struct sockaddr *)&sin,
+			                                 sin_len));
 			}
 			else
 			{ 
@@ -286,8 +306,12 @@ int main(int argc, char * argv[]){
 					      char *string = malloc(BUF_SIZE);
 					      len=fread(string,1,BUF_SIZE,fp);	           
 					      fseek(fp, 0, SEEK_CUR);
-					      int x=sendto(s,string,len,0,(struct sockaddr*)&sin,sin_len); 
-					      printf("sent frame %d\n",i);
+					      if (sendto(s, string, len, 0,
+					                 (struct sockaddr *)&sin,
+					                 sin_len) < 0)
+						      multicast_tx_warn_sendto("sender: sendto");
+					      else
+						      printf("sent frame %d\n", i);
 				      	usleep(10000);
 			      }
 			      
